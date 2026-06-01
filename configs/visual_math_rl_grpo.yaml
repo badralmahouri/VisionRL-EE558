@@ -1,0 +1,125 @@
+# GRPO config for visual-math RL (Path B: no SFT cold-start, no tools, free-prose
+# output, regex reward). Cloned from configs/cof_rl_grpo.yaml with tool-agent
+# specifics stripped.
+#
+# Run via slurm/visual_math_rl_smoke.slurm  (50 iters, 200 rows)
+#     or slurm/visual_math_rl_train.slurm  (500 iters, ~5K rows)
+#
+# Per-arm overrides via Hydra: e.g.
+#   data.train_files=...mathvr_train.parquet
+#   data.val_files=...mathvr_indist_eval.parquet
+#   trainer.experiment_name=apertus8b_grpo_visual_math_mathvr
+#   trainer.total_epochs=N
+#
+# W&B is set to offline mode in the SLURM scripts (WANDB_MODE=offline), so all
+# logs land in <run_dir>/wandb/ as local files — no account needed. Read them
+# with pandas / matplotlib in notebooks/visual_math_rl_plots.ipynb.
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  # Defaults; SLURM scripts override per arm via cli.
+  train_files: /capstor/scratch/cscs/badralmahouri/verl-apertus/data_prep/visual_math_rl/mathvr_train.parquet
+  val_files:
+    - /capstor/scratch/cscs/badralmahouri/verl-apertus/data_prep/visual_math_rl/mathvr_indist_eval.parquet
+    - /capstor/scratch/cscs/badralmahouri/verl-apertus/data_prep/visual_math_rl/mathvision_eval.parquet
+    - /capstor/scratch/cscs/badralmahouri/verl-apertus/data_prep/visual_math_rl/mathverse_visionOnly_eval.parquet
+  prompt_key: prompt
+  # Apertus model_max = 8192. Sglang computes max_new_tokens =
+  # (max_response_length + max_prompt_length - actual_input_len), then
+  # clamps to (model_max - actual_input_len) and *strictly* validates the
+  # sum <= model_max. Keep the sum well under 8192 (here 6524, ~1.6K margin).
+  max_prompt_length: 5500
+  max_response_length: 1024
+  train_batch_size: 64
+  return_raw_chat: true
+  return_multi_modal_inputs: false
+  apply_chat_template_kwargs:
+    enable_thinking: true
+  filter_overlong_prompts: true   # drop overlong rows at dataset load instead of crashing later
+  truncation: right               # silent right-truncate if filter didn't catch it
+  custom_cls:
+    path: /capstor/scratch/cscs/badralmahouri/verl-apertus/data_prep/apertus_rl_dataset.py
+    name: ApertusRLHFDataset
+
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    path: /capstor/store/cscs/swissai/infra01/MLLM/ablations/apertus-8b-img-SFT-32nodes-gbs512-mbs1-steps8030-img-text-seqlen8192-s2onlytxtloss/HF
+    trust_remote_code: true
+    enable_gradient_checkpointing: true
+  actor:
+    optim:
+      lr: 1e-6
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    ppo_mini_batch_size: 64
+    ppo_micro_batch_size_per_gpu: 1
+  rollout:
+    name: sglang
+    # Lowered from 0.5 → 0.4 after MathVR smoke OOM'd in 4th attempt (job
+    # 2320089). DynaMath peaked at 48 GB on H100 (60% of 80 GB) with 0.5; 0.4
+    # gives sglang less KV-cache headroom but leaves room for outlier prompts.
+    gpu_memory_utilization: 0.4
+    tensor_model_parallel_size: 2
+    # GRPO group size: was 8, lowered to 4 (teammate-suggested + halves rollout
+    # volume per iter, reduces pressure on sglang's leaky allocator paths).
+    # Standard math-RL literature also uses n=4.
+    n: 4
+    log_prob_micro_batch_size_per_gpu: 4
+    # Note: no `agent:` block and no `multi_turn:` block — plain single-turn
+    # rollouts, which is what we want for free-prose math output.
+    engine_kwargs:
+      sglang:
+        # Cascade of sglang flags to work around bookkeeping leaks in this version's
+        # token_to_kv_pool_allocator. Teammate (bbox-RL, similar pure-RL setup, working
+        # training) suggested these after we hit `memory leak detected!` even after
+        # disable_radix_cache:true (jobs 2320502, 2333587 both crashed pre-iter-25).
+        disable_radix_cache: true        # remove leaking radix-cache structure
+        disable_overlap_schedule: true   # sequential scheduling, no concurrent-request races
+        chunked_prefill_size: -1         # single-shot prefill, no per-chunk alloc/free
+        page_size: 1                     # smallest KV-cache page; finer-grained free
+        # Trade-off: ~20-30% slower rollouts. Worth it for pipeline correctness.
+  ref:
+    log_prob_micro_batch_size_per_gpu: 4
+    fsdp_config:
+      param_offload: true
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+# Top-level (NOT under `reward:`). Verl's experimental reward_loop reads
+# config.custom_reward_function (see verl/trainer/ppo/reward.py:60-90 and
+# verl/experimental/reward_loop/reward_loop.py:113). The nested `reward:` block
+# from cof_rl_grpo.yaml is silently ignored by the experimental code path.
+custom_reward_function:
+  path: /capstor/scratch/cscs/badralmahouri/verl-apertus/rewards/visual_math_rl_reward.py
+  # v3 = pure binary Qwen3-32B judge reward. Requires VISUAL_MATH_JUDGE_URL
+  # env var; the train SLURM script populates this from slurm/judge_url.txt.
+  # (To replay with v1 binary regex or v2 continuous, change to
+  # compute_score_v2 — v1 isn't exposed as a top-level entry point.)
+  name: compute_score_v3
+
+reward_model:
+  reward_manager: naive   # default; reward_loop reads this for which RewardManager class to instantiate
+
+trainer:
+  project_name: apertus-visual-math-rl
+  experiment_name: apertus8b_grpo_visual_math  # override per arm
+  total_epochs: 5
+  n_gpus_per_node: 4
+  nnodes: 1
+  save_freq: 100
+  test_freq: 50
+  critic_warmup: 0
+  logger: ["console", "wandb"]   # wandb in offline mode (set via env) writes local files only
+  rollout_data_dir: /capstor/scratch/cscs/badralmahouri/verl-apertus/slurm/rollout_logs/visual_math_rl

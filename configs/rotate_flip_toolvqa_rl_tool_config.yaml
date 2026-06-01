@@ -1,0 +1,27 @@
+tools:
+  - class_name: "tools.rotate_flip_emu_tool.RotateFlipEmuTool"
+    config:
+      type: native
+      vq_model_path: /capstor/store/cscs/swissai/infra01/MLLM/tokenizer/Emu3.5-VisionTokenizer
+      vq_device: cuda:0
+      max_operations: 4
+    tool_schema:
+      type: function
+      function:
+        name: rotate_flip_tool
+        description: "Rotate and/or flip the image to make tilted, sideways, upside-down, or mirrored content easier to inspect. Returns the transformed image."
+        parameters:
+          type: object
+          properties:
+            operation:
+              type: string
+              enum: [rotate_30, rotate_45, rotate_60, rotate_90, rotate_120, rotate_135, rotate_150, rotate_180, rotate_210, rotate_225, rotate_240, rotate_270, rotate_300, rotate_315, rotate_330, flip_horizontal, flip_vertical, transpose, transverse]
+              description: "Single transform to apply."
+            operations:
+              type: array
+              items:
+                type: string
+                enum: [rotate_30, rotate_45, rotate_60, rotate_90, rotate_120, rotate_135, rotate_150, rotate_180, rotate_210, rotate_225, rotate_240, rotate_270, rotate_300, rotate_315, rotate_330, flip_horizontal, flip_vertical, transpose, transverse]
+              description: "Optional list of transforms to apply in order. Use this when both rotation and mirroring are needed."
+          required:
+            - operation

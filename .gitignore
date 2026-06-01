@@ -1,0 +1,55 @@
+# Data (reproducible from prepare scripts, too large for git)
+data_prep/*/
+datasets/
+results/
+slurm/*/
+plans/
+
+# Model checkpoints / training output
+checkpoints/
+outputs/
+wandb/
+runs/
+*.pt
+*.safetensors
+*.ckpt
+
+# Processed dataset binaries
+*.parquet
+*.feather
+*.arrow
+*.pkl
+*.pickle
+
+# Raw images (no tracked images today; force-add docs assets with `git add -f`)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# SLURM output
+*.out
+*.err
+slurm-*.out
+nohup.out
+core_*
+logs/
+
+# Notebook research artifacts (large, regenerable from build scripts)
+notebooks/.artifacts/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+.ipynb_checkpoints/

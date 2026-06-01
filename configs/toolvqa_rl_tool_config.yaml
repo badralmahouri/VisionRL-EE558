@@ -1,0 +1,32 @@
+tools:
+  - class_name: "tools.line_drawing_emu_tool.LineDrawingEmuTool"
+    config:
+      type: native
+      vq_model_path: /capstor/store/cscs/swissai/infra01/MLLM/tokenizer/Emu3.5-VisionTokenizer
+      vq_device: cuda:0
+      default_color: red
+      default_width: 4
+      max_points: 64
+    tool_schema:
+      type: function
+      function:
+        name: line_drawing_tool
+        description: "Draw one or more line segments on the image to mark geometry, align values, connect objects, or highlight spatial relations. Returns the annotated image."
+        parameters:
+          type: object
+          properties:
+            points:
+              type: array
+              items:
+                type: array
+                items:
+                  type: number
+              description: "List of points [[x1, y1], [x2, y2], ...]. Consecutive points are connected by line segments."
+            color:
+              type: string
+              description: "Optional line color, default red."
+            width:
+              type: number
+              description: "Optional line width in pixels, default 4."
+          required:
+            - points

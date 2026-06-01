@@ -1,0 +1,100 @@
+# Lens-search GRPO — Arm B: SFT-trained ckpt → RL.
+# Identical to lens_search_rl_grpo_armA.yaml except:
+#  - actor_rollout_ref.model.path points at the SFT-trained ckpt.
+#  - trainer.experiment_name reflects the SFT-then-RL flow.
+#
+# The SFT ckpt path is env-overridable so the SLURM script can patch it at
+# submission time once the SFT job lands (the SFT trainer writes
+# `checkpoints/apertus8b-lens-search-sft/global_step_NN/actor/huggingface/`
+# style paths; we point at the latest).
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  train_files: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/data_prep/lens_search/rl_fvqa_train.parquet
+  val_files: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/data_prep/lens_search/rl_fvqa_indist_val.parquet
+  prompt_key: prompt
+  # 5,000-token total budget (Badr 2026-05-21) — matches Arm A. See Arm A config for rationale.
+  max_prompt_length: 2500
+  max_response_length: 2500
+  train_batch_size: 64
+  return_raw_chat: true
+  return_multi_modal_inputs: false
+  apply_chat_template_kwargs:
+    enable_thinking: true
+  filter_overlong_prompts: true
+  truncation: right
+  custom_cls:
+    path: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/data_prep/apertus_rl_dataset.py
+    name: ApertusRLHFDataset
+
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    # SFT-trained ckpt. Default points at the apertus8b-lens-search-sft
+    # final ckpt; override via env var SFT_CKPT_PATH at submission time
+    # if the actual save path differs.
+    path: ${oc.env:SFT_CKPT_PATH,/capstor/scratch/cscs/${oc.env:USER}/verl-apertus/checkpoints/apertus8b-lens-search-sft}
+    trust_remote_code: true
+    enable_gradient_checkpointing: true
+  actor:
+    optim:
+      lr: 1e-6
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    ppo_mini_batch_size: 64
+    ppo_micro_batch_size_per_gpu: 1
+  rollout:
+    name: sglang
+    gpu_memory_utilization: 0.5
+    tensor_model_parallel_size: 2
+    n: 8
+    log_prob_micro_batch_size_per_gpu: 4
+    agent:
+      agent_loop_config_path: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/configs/apertus_agent_loop.yaml
+    multi_turn:
+      enable: true
+      format: apertus
+      max_assistant_turns: 3
+      max_parallel_calls: 1
+      max_tool_response_length: 512
+      tool_response_truncate_side: middle
+      tool_config_path: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/configs/lens_search_tool_config.yaml
+  ref:
+    log_prob_micro_batch_size_per_gpu: 4
+    fsdp_config:
+      param_offload: true
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+reward:
+  reward_manager:
+    name: naive
+
+# custom_reward_function MUST be at top level — see Arm A config for full notes.
+custom_reward_function:
+  path: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/rewards/lens_search_rl_reward.py
+  name: compute_score
+
+trainer:
+  project_name: lens_search_rl_apertus
+  experiment_name: apertus8b-lens-search-armB-SFTthenRL-d76
+  total_training_steps: ${oc.decode:${oc.env:TOTAL_STEPS,50}}
+  n_gpus_per_node: 4
+  nnodes: 1
+  save_freq: 10
+  test_freq: 10
+  critic_warmup: 0
+  logger: [console, file]
+  rollout_data_dir: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/slurm/rollout_logs/armB-d76
+  default_local_dir: /capstor/scratch/cscs/${oc.env:USER}/verl-apertus/checkpoints/apertus8b-lens-search-armB-d76

@@ -1,0 +1,25 @@
+tools:
+  - class_name: "tools.lens_search_tool.LensSearchTool"
+    config:
+      type: native
+      # mode: 'cached' (FVQA pkl) or 'live' (GCP Vision API).
+      # Falls back to env var LENS_TOOL_MODE; default 'cached'.
+      mode: ${oc.env:LENS_TOOL_MODE,cached}
+      # Cached mode: absolute path to the FVQA train-cache pkl. The default
+      # is the path on the Clariden HF cache where it was downloaded by
+      # data_prep/prepare_lens_search_sft.py. Override via env if needed.
+      cache_pkl_path: ${oc.env:LENS_CACHE_PKL,/iopsstor/scratch/cscs/badralmahouri/hf_home/hub/datasets--lmms-lab--FVQA/snapshots/bb4a4ff4c9c3fd0382d11f5d7fccd66d0b8428b5/fvqa_train_image_search_results_cache.pkl}
+      max_response_chars: 1800
+    tool_schema:
+      type: function
+      function:
+        name: lens_search
+        description: "Search the web for information about an entity, landmark, object, or text visible in the user's image. Use this when the user asks a knowledge question that requires identifying an entity in the image or looking up an attribute / fact about it."
+        parameters:
+          type: object
+          properties:
+            query:
+              type: string
+              description: "Short natural-language query describing what to look up about the image."
+          required:
+            - query
