@@ -178,12 +178,26 @@ sbatch slurm/line_drawing_rl.slurm --fresh             # GRPO with the tool
 sbatch slurm/line_drawing_rl_no_tool.slurm --fresh     # tool free ablation
 ```
 
-ToolVQA task: text answer ToolVQA rows filtered to spatial questions where a line helps.
+ToolVQA task: text-answer ToolVQA rows whose original ToolVQA context used spatial
+tools. This is the image prefilter used for the line-drawing run: each ToolVQA row has
+a `context` list with tool-call metadata, and
+`data_prep/prepare_toolvqa_rl_parse.py --keep-tools ...` keeps only rows where at least
+one `context[*].name` matches the requested tool names. For line drawing, the useful
+metadata tools are `TextToBbox`, `RegionAttributeDescription`, `CountGivenObject`, and
+`Plot`, because those rows usually require grounding text, regions, counts, or plotted
+spatial relationships in the image before answering.
 
 ```bash
-DOWNLOAD_TOOLVQA=1 sbatch slurm/prepare_toolvqa_rl.slurm
+DOWNLOAD_TOOLVQA=1 TOOLVQA_NUM_SAMPLES=5000 sbatch slurm/prepare_toolvqa_rl.slurm -- \
+  --keep-tools TextToBbox RegionAttributeDescription CountGivenObject Plot
 sbatch slurm/toolvqa_rl.slurm --fresh
 ```
+
+When `DOWNLOAD_TOOLVQA=1` is used with `slurm/prepare_toolvqa_rl.slurm`, the downloader
+first samples text-answer ToolVQA rows into `data_prep/toolvqa/`; the parser then applies
+the `--keep-tools` filter while encoding IBQ tokens and writing
+`data_prep/toolvqa_rl/{train,val,test}.parquet`. If too few rows survive the filter,
+increase `TOOLVQA_NUM_SAMPLES` or relax the tool list.
 
 Baselines, inference sweeps, and plotting:
 
@@ -228,13 +242,22 @@ sbatch slurm/rotate_flip_rl.slurm --fresh              # GRPO with the tool
 sbatch slurm/rotate_flip_rl_no_tool.slurm --fresh      # tool free ablation
 ```
 
-ToolVQA task: text answer ToolVQA rows filtered to OCR heavy questions. The shared parser
-`data_prep/prepare_toolvqa_rl_parse.py` wires the tool selected with `--tool-name`:
+ToolVQA task: text-answer ToolVQA rows filtered to OCR-heavy images. The rotate/flip
+wrapper uses the same `context[*].name` mechanism, but defaults
+`TOOLVQA_KEEP_TOOLS=OCR`, so only rows whose original ToolVQA trace used OCR are sampled
+and encoded. The shared parser `data_prep/prepare_toolvqa_rl_parse.py` wires the visual
+tool selected with `--tool-name rotate_flip_tool`:
 
 ```bash
 DOWNLOAD_TOOLVQA=1 sbatch slurm/prepare_rotate_flip_toolvqa_rl.slurm
 sbatch slurm/rotate_flip_toolvqa_rl.slurm --fresh
 ```
+
+For this wrapper the filter is applied at both stages: the downloader passes
+`--keep-tools $TOOLVQA_KEEP_TOOLS` when building `data_prep/toolvqa/`, and the parser
+passes the same filter while producing `data_prep/rotate_flip_toolvqa_rl/`. Override the
+selection with, for example, `TOOLVQA_KEEP_TOOLS="OCR TextToBbox"` if you want a broader
+rotate/flip ToolVQA subset.
 
 Baselines, inference sweeps, and plotting:
 
